@@ -1,1 +1,1 @@
-# SysY-LSP
+# SysY-lsp
