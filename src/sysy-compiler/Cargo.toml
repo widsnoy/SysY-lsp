@@ -1,0 +1,9 @@
+[package]
+name = "sysy-compiler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# 使用 workspace 定义的版本
+logos = { workspace = true }
+rowan = { workspace = true }
