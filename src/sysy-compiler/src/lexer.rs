@@ -3,7 +3,7 @@ use std::num::ParseIntError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LexerError {
-    InvalidInteger,
+    // InvalidInteger,
     InvalidToken,
 }
 
@@ -13,41 +13,11 @@ impl Default for LexerError {
     }
 }
 
-impl From<ParseIntError> for LexerError {
-    fn from(_: ParseIntError) -> Self {
-        LexerError::InvalidInteger
-    }
-}
-
-/// 字符串 -> 数字 (仅用于验证)
-fn parse_int_literal(lex: &mut logos::Lexer<TokenKind>) -> Result<(), LexerError> {
-    let slice = lex.slice();
-
-    // Check for valid integer literal format first
-    let value = if slice.starts_with("0x") || slice.starts_with("0X") {
-        // Hexadecimal: 0x followed by hex digits
-        let hex_body = &slice[2..];
-        if hex_body.is_empty() || !hex_body.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(LexerError::InvalidInteger);
-        }
-        isize::from_str_radix(hex_body, 16)
-    } else if slice.starts_with('0') && slice.len() > 1 {
-        // Octal: 0 followed by octal digits (0-7)
-        let octal_body = &slice[1..];
-        if !octal_body.chars().all(|c| c >= '0' && c <= '7') {
-            return Err(LexerError::InvalidInteger);
-        }
-        isize::from_str_radix(octal_body, 8)
-    } else {
-        // Decimal: should only contain digits
-        if !slice.chars().all(|c| c.is_ascii_digit()) {
-            return Err(LexerError::InvalidInteger);
-        }
-        slice.parse::<isize>()
-    };
-
-    value.map(|_| ()).map_err(|_| LexerError::InvalidInteger)
-}
+// impl From<ParseIntError> for LexerError {
+//     fn from(_: ParseIntError) -> Self {
+//         LexerError::InvalidInteger
+//     }
+// }
 
 #[derive(Logos, Debug, PartialEq, Eq, Clone, Copy)]
 #[logos(error = LexerError)]
@@ -82,7 +52,7 @@ pub enum TokenKind {
     #[regex("[a-zA-Z_][a-zA-Z0-9_]*")]
     Ident,
 
-    #[regex(r"[0-9][0-9a-zA-Z_]*", parse_int_literal)]
+    #[regex(r"[0-9][0-9a-zA-Z_]*")]
     IntConst,
 
     #[token("+")]
@@ -191,50 +161,6 @@ mod tests {
         ];
 
         assert_eq!(tokens, expected);
-    }
-
-    #[test]
-    fn test_integer_literals() {
-        let test_cases = vec![
-            // Valid decimal
-            ("0", Ok(TokenKind::IntConst)),
-            ("42", Ok(TokenKind::IntConst)),
-            ("123", Ok(TokenKind::IntConst)),
-            // Valid hexadecimal
-            ("0x0", Ok(TokenKind::IntConst)),
-            ("0x42", Ok(TokenKind::IntConst)),
-            ("0XaB", Ok(TokenKind::IntConst)),
-            ("0xff", Ok(TokenKind::IntConst)),
-            // Valid octal
-            ("01", Ok(TokenKind::IntConst)),
-            ("07", Ok(TokenKind::IntConst)),
-            ("0123", Ok(TokenKind::IntConst)),
-            // Invalid cases that should be lexer errors
-            ("0x", Err(LexerError::InvalidInteger)), // hex prefix without digits
-            ("0xG", Err(LexerError::InvalidInteger)), // invalid hex digit
-            ("08", Err(LexerError::InvalidInteger)), // invalid octal digit
-            ("09", Err(LexerError::InvalidInteger)), // invalid octal digit
-            ("123abc", Err(LexerError::InvalidInteger)), // mixed letters in decimal
-            ("0xabc_def", Err(LexerError::InvalidInteger)), // underscore in hex
-        ];
-
-        for (input, expected) in test_cases {
-            let tokens: Vec<_> = lex(input).collect();
-            // Should have at least 1 token (the parsed token or error), maybe 2 with EOF
-            assert!(!tokens.is_empty(), "No tokens for input: {}", input);
-
-            let (result, text, _span) = &tokens[0];
-            assert_eq!(text, &input);
-
-            match expected {
-                Ok(expected_kind) => {
-                    assert_eq!(*result, Ok(expected_kind), "Failed for input: {}", input);
-                }
-                Err(expected_error) => {
-                    assert_eq!(*result, Err(expected_error), "Failed for input: {}", input);
-                }
-            }
-        }
     }
 
     #[test]

@@ -355,11 +355,7 @@ impl<'a> Parser<'a> {
         self.builder.start_node(SyntaxKind::ConstDecl.into());
 
         // 'const'
-        if self.peek() == Some(SyntaxKind::Const) {
-            self.bump();
-        } else {
-            self.errors.push("Expected 'const'".to_string());
-        }
+        self.expect_token(SyntaxKind::Const);
 
         // BType
         self.parse_btype();
@@ -374,12 +370,7 @@ impl<'a> Parser<'a> {
         }
 
         // ';'
-        if self.peek() == Some(SyntaxKind::Semicolon) {
-            self.bump();
-        } else {
-            self.errors
-                .push("Expected ';' after constant declaration".to_string());
-        }
+        self.expect_token(SyntaxKind::Semicolon);
 
         self.builder.finish_node();
     }
@@ -389,14 +380,7 @@ impl<'a> Parser<'a> {
     fn parse_btype(&mut self) {
         self.builder.start_node(SyntaxKind::BType.into());
 
-        match self.peek() {
-            Some(SyntaxKind::Int) => {
-                self.bump();
-            }
-            _ => {
-                self.errors.push("Expected 'int' type".to_string());
-            }
-        }
+        self.expect_token(SyntaxKind::Int);
 
         self.builder.finish_node();
     }
@@ -407,31 +391,17 @@ impl<'a> Parser<'a> {
         self.builder.start_node(SyntaxKind::ConstDef.into());
 
         // Ident
-        if self.peek() == Some(SyntaxKind::Ident) {
-            self.bump();
-        } else {
-            self.errors
-                .push("Expected identifier in constant definition".to_string());
-        }
+        self.expect_token(SyntaxKind::Ident);
 
-        // { '[' ConstExp ']' } - 数组维度，暂时跳过
+        // { '[' ConstExp ']' } - 数组维度
         while self.peek() == Some(SyntaxKind::LBracket) {
             self.bump(); // '['
             self.parse_const_exp();
-            if self.peek() == Some(SyntaxKind::RBracket) {
-                self.bump(); // ']'
-            } else {
-                self.errors.push("Expected ']'".to_string());
-            }
+            self.expect_token(SyntaxKind::RBracket);
         }
 
         // '='
-        if self.peek() == Some(SyntaxKind::Assign) {
-            self.bump();
-        } else {
-            self.errors
-                .push("Expected '=' in constant definition".to_string());
-        }
+        self.expect_token(SyntaxKind::Assign);
 
         // ConstInitVal
         self.parse_const_init_val();
@@ -460,12 +430,7 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            if self.peek() == Some(SyntaxKind::RBrace) {
-                self.bump(); // '}'
-            } else {
-                self.errors
-                    .push("Expected '}' after array initialization".to_string());
-            }
+            self.expect_token(SyntaxKind::RBrace);
         } else {
             // 单个常量表达式
             self.parse_const_exp();
@@ -503,27 +468,22 @@ impl<'a> Parser<'a> {
     }
 
     /// 解析变量定义
-    /// VarDef → Ident { '[' ConstExp ']' } '=' InitVal
+    /// VarDef → Ident { '[' ConstExp ']' } | VarDef → Ident { '[' ConstExp ']' } '=' InitVal
     fn parse_var_def(&mut self) {
         self.builder.start_node(SyntaxKind::VarDef.into());
 
         // Ident
-        if self.peek() == Some(SyntaxKind::Ident) {
-            self.bump();
-        } else {
-            self.errors
-                .push("Expected identifier in variable definition".to_string());
-        }
+        self.expect_token(SyntaxKind::Ident);
 
         // { '[' ConstExp ']' }
         while self.peek() == Some(SyntaxKind::LBracket) {
             self.bump(); // '['
-            self.parse_const_exp();
-            if self.peek() == Some(SyntaxKind::RBracket) {
-                self.bump(); // ']'
-            } else {
-                self.errors.push("Expected ']'".to_string());
+
+            if self.peek() != Some(SyntaxKind::RBracket) {
+                self.parse_const_exp();
             }
+
+            self.expect_token(SyntaxKind::RBracket);
         }
 
         // [ '=' InitVal ]
@@ -556,12 +516,7 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            if self.peek() == Some(SyntaxKind::RBrace) {
-                self.bump(); // '}'
-            } else {
-                self.errors
-                    .push("Expected '}' after array initialization".to_string());
-            }
+            self.expect_token(SyntaxKind::RBrace);
         } else {
             // 表达式
             self.parse_exp();
@@ -589,33 +544,234 @@ impl<'a> Parser<'a> {
         false
     }
 
-    /// 暂时的占位实现
+    /// 判断标识符后面是否跟着函数调用
+    fn is_func_call(&self) -> bool {
+        let mut found_ident = false;
+        let mut step_count = 0;
+
+        for (result, _) in self.tokens.iter().rev() {
+            step_count += 1;
+            if step_count > 10 {
+                break;
+            }
+
+            match result {
+                Ok(kind) => {
+                    let syntax_kind: SyntaxKind = (*kind).into();
+                    match syntax_kind {
+                        SyntaxKind::Whitespace | SyntaxKind::Comment => {
+                            continue;
+                        }
+                        SyntaxKind::Ident if !found_ident => {
+                            found_ident = true;
+                            continue;
+                        }
+                        SyntaxKind::LParen if found_ident => {
+                            return true;
+                        }
+                        _ => {
+                            return false;
+                        }
+                    }
+                }
+                Err(_) => return false,
+            }
+        }
+        false
+    }
+
+    /// ConstExp -> AddExp
     fn parse_const_exp(&mut self) {
         self.builder.start_node(SyntaxKind::ConstExp.into());
-        // TODO: 实现常量表达式解析
-        if self.peek() == Some(SyntaxKind::IntConst) {
-            self.bump();
-        } else {
-            self.errors.push("Expected constant expression".to_string());
-        }
+        self.parse_add_exp();
         self.builder.finish_node();
     }
 
-    /// 暂时的占位实现
+    /// Exp -> LOrExp ? 不然 (x > y) 这种没法解析
     fn parse_exp(&mut self) {
         self.builder.start_node(SyntaxKind::Exp.into());
-        // TODO: 实现表达式解析
-        while self.peek() != Some(SyntaxKind::Semicolon)
-            && self.peek() != Some(SyntaxKind::Comma)
-            && self.peek() != Some(SyntaxKind::RBrace)
-            && self.peek() != Some(SyntaxKind::Eof)
-        {
+        self.parse_l_or_exp();
+        self.builder.finish_node();
+    }
+
+    /// AddExp -> MulExp | AddExp ('+' | '-') MulExp
+    fn parse_add_exp(&mut self) {
+        self.builder.start_node(SyntaxKind::AddExp.into());
+        self.parse_mul_exp();
+        while matches!(self.peek(), Some(SyntaxKind::Plus | SyntaxKind::Minus)) {
             self.bump();
+            self.parse_mul_exp();
         }
         self.builder.finish_node();
     }
 
-    /// 解析函数定义
+    // MulExp → UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
+    fn parse_mul_exp(&mut self) {
+        self.builder.start_node(SyntaxKind::MulExp.into());
+        self.parse_unary_exp();
+        while matches!(
+            self.peek(),
+            Some(SyntaxKind::Mul | SyntaxKind::Div | SyntaxKind::Mod)
+        ) {
+            self.bump();
+            self.parse_unary_exp();
+        }
+        self.builder.finish_node();
+    }
+
+    // UnaryExp → PrimaryExp | Ident '(' [FuncRParams] ')' | UnaryOp UnaryExp
+    fn parse_unary_exp(&mut self) {
+        self.builder.start_node(SyntaxKind::UnaryExp.into());
+
+        match self.peek() {
+            Some(SyntaxKind::Not | SyntaxKind::Plus | SyntaxKind::Minus) => {
+                self.parse_unary_op();
+                self.parse_unary_exp();
+            }
+
+            Some(SyntaxKind::Ident) => {
+                if self.is_func_call() {
+                    // 函数调用: Ident '(' [FuncRParams] ')'
+                    self.bump(); // Ident
+                    self.bump(); // LParen
+                    if self.peek() == Some(SyntaxKind::RParen) {
+                        self.bump(); // RParen
+                    } else {
+                        self.parse_func_rparams(); // 解析实参列表
+                        self.expect_token(SyntaxKind::RParen); // RParen
+                    }
+                } else {
+                    // PrimaryExp (LVal)
+                    self.parse_primary_exp();
+                }
+            }
+
+            Some(SyntaxKind::IntConst | SyntaxKind::LParen) => {
+                self.parse_primary_exp();
+            }
+
+            _ => {
+                self.errors.push("Expected unary expression".to_string());
+            }
+        }
+
+        self.builder.finish_node();
+    }
+
+    /// UnaryOp→ '+' | '−' | '!' 注:'!'仅出现在条件表达式中
+    fn parse_unary_op(&mut self) {
+        self.builder.start_node(SyntaxKind::UnaryOp.into());
+        match self.peek() {
+            Some(SyntaxKind::Not | SyntaxKind::Plus | SyntaxKind::Minus) => self.bump(),
+            _ => {
+                self.errors
+                    .push(format!("Expected unary operator, found: {:?}", self.peek()));
+            }
+        }
+        self.builder.finish_node();
+    }
+
+    /// PrimaryExp → '(' Exp ')' | LVal | Number
+    fn parse_primary_exp(&mut self) {
+        self.builder.start_node(SyntaxKind::PrimaryExp.into());
+
+        match self.peek() {
+            Some(SyntaxKind::LParen) => {
+                self.bump(); // '('
+                self.parse_exp();
+                self.expect_token(SyntaxKind::RParen); // ')'
+            }
+            Some(SyntaxKind::Ident) => {
+                // LVal
+                self.parse_lval();
+            }
+            Some(SyntaxKind::IntConst) => {
+                // Number
+                self.parse_number();
+            }
+            _ => {
+                self.errors.push("Expected primary expression".to_string());
+            }
+        }
+
+        self.builder.finish_node();
+    }
+
+    /// Cond → LOrExp
+    fn parse_cond(&mut self) {
+        self.builder.start_node(SyntaxKind::Cond.into());
+        self.parse_l_or_exp();
+        self.builder.finish_node();
+    }
+
+    /// LVal → Ident { '[' Exp ']' }
+    fn parse_lval(&mut self) {
+        self.builder.start_node(SyntaxKind::LVal.into());
+
+        // Ident
+        if self.peek() == Some(SyntaxKind::Ident) {
+            self.bump();
+        } else {
+            self.errors.push("Expected identifier in LVal".to_string());
+        }
+
+        // { '[' Exp ']' }
+        while self.peek() == Some(SyntaxKind::LBracket) {
+            self.bump(); // '['
+            self.parse_exp();
+            self.expect_token(SyntaxKind::RBracket); // ']'
+        }
+
+        self.builder.finish_node();
+    }
+
+    /// RelExp → AddExp | RelExp ('<' | '>' | '<=' | '>=') AddExp
+    fn parse_rel_exp(&mut self) {
+        self.builder.start_node(SyntaxKind::RelExp.into());
+        self.parse_add_exp();
+        while matches!(
+            self.peek(),
+            Some(SyntaxKind::Lt | SyntaxKind::Gt | SyntaxKind::Leq | SyntaxKind::Geq)
+        ) {
+            self.bump();
+            self.parse_add_exp();
+        }
+        self.builder.finish_node();
+    }
+
+    /// EqExp → RelExp | EqExp ('==' | '!=') RelExp
+    fn parse_eq_exp(&mut self) {
+        self.builder.start_node(SyntaxKind::EqExp.into());
+        self.parse_rel_exp();
+        while matches!(self.peek(), Some(SyntaxKind::Eq | SyntaxKind::Neq)) {
+            self.bump();
+            self.parse_rel_exp();
+        }
+        self.builder.finish_node();
+    }
+
+    /// LAndExp → EqExp | LAndExp '&&' EqExp
+    fn parse_l_and_exp(&mut self) {
+        self.builder.start_node(SyntaxKind::LAndExp.into());
+        self.parse_eq_exp();
+        while self.peek() == Some(SyntaxKind::And) {
+            self.bump(); // '&&'
+            self.parse_eq_exp();
+        }
+        self.builder.finish_node();
+    }
+
+    /// LOrExp → LAndExp | LOrExp '||' LAndExp
+    fn parse_l_or_exp(&mut self) {
+        self.builder.start_node(SyntaxKind::LOrExp.into());
+        self.parse_l_and_exp();
+        while self.peek() == Some(SyntaxKind::Or) {
+            self.bump(); // '||'
+            self.parse_l_and_exp();
+        }
+        self.builder.finish_node();
+    }
+
     /// FuncDef → FuncType Ident '(' [FuncFParams] ')' Block
     fn parse_func_def(&mut self) {
         self.builder.start_node(SyntaxKind::FuncDef.into());
@@ -631,12 +787,7 @@ impl<'a> Parser<'a> {
         }
 
         // '('
-        if self.peek() == Some(SyntaxKind::LParen) {
-            self.bump();
-        } else {
-            self.errors
-                .push("Expected '(' after function name".to_string());
-        }
+        self.expect_token(SyntaxKind::LParen);
 
         // [FuncFParams]
         if self.peek() != Some(SyntaxKind::RParen) {
@@ -644,12 +795,7 @@ impl<'a> Parser<'a> {
         }
 
         // ')'
-        if self.peek() == Some(SyntaxKind::RParen) {
-            self.bump();
-        } else {
-            self.errors
-                .push("Expected ')' after function parameters".to_string());
-        }
+        self.expect_token(SyntaxKind::RParen);
 
         // Block
         self.parse_block();
@@ -716,15 +862,28 @@ impl<'a> Parser<'a> {
                 while self.peek() == Some(SyntaxKind::LBracket) {
                     self.bump(); // '['
                     self.parse_exp();
-                    if self.peek() == Some(SyntaxKind::RBracket) {
-                        self.bump(); // ']'
-                    } else {
-                        self.errors.push("Expected ']'".to_string());
-                    }
+                    self.expect_token(SyntaxKind::RBracket); // ']'
                 }
             } else {
                 self.errors.push("Expected ']' after '['".to_string());
             }
+        }
+
+        self.builder.finish_node();
+    }
+
+    /// 解析函数实参列表
+    /// FuncRParams → Exp { ',' Exp }
+    fn parse_func_rparams(&mut self) {
+        self.builder.start_node(SyntaxKind::FuncRParams.into());
+
+        // 第一个参数
+        self.parse_exp();
+
+        // 后续参数
+        while self.peek() == Some(SyntaxKind::Comma) {
+            self.bump(); // ','
+            self.parse_exp();
         }
 
         self.builder.finish_node();
@@ -736,11 +895,7 @@ impl<'a> Parser<'a> {
         self.builder.start_node(SyntaxKind::Block.into());
 
         // '{'
-        if self.peek() == Some(SyntaxKind::LBrace) {
-            self.bump();
-        } else {
-            self.errors.push("Expected '{'".to_string());
-        }
+        self.expect_token(SyntaxKind::LBrace);
 
         // { BlockItem }
         while self.peek() != Some(SyntaxKind::RBrace) && self.peek() != Some(SyntaxKind::Eof) {
@@ -764,17 +919,20 @@ impl<'a> Parser<'a> {
         }
 
         // '}'
-        if self.peek() == Some(SyntaxKind::RBrace) {
-            self.bump();
-        } else {
-            self.errors.push("Expected '}'".to_string());
-        }
+        self.expect_token(SyntaxKind::RBrace);
 
         self.builder.finish_node();
     }
 
-    /// 解析语句 (简化版本)
-    /// Stmt → LVal '=' Exp ';' | [Exp] ';' | Block | ...
+    /// Stmt → LVal '=' Exp ';' 这里 LVal 先被当初 Exp 处理
+    /// | [Exp] ';'
+    /// | Block
+    /// | 'if' '(' Cond ')' Stmt [ 'else' Stmt ]
+    /// | 'while' '(' Cond ')' Stmt
+    /// | 'break' ';'
+    /// | 'continue' ';'
+    /// | 'return' [Exp] ';'
+
     fn parse_stmt(&mut self) {
         self.builder.start_node(SyntaxKind::Stmt.into());
 
@@ -784,16 +942,22 @@ impl<'a> Parser<'a> {
                 self.parse_block();
             }
             Some(SyntaxKind::If) => {
-                // TODO: if statement
                 self.bump();
-                self.errors
-                    .push("If statements not yet implemented".to_string());
+                self.expect_token(SyntaxKind::LParen);
+                self.parse_cond();
+                self.expect_token(SyntaxKind::RParen);
+                self.parse_stmt();
+                if self.peek() == Some(SyntaxKind::Else) {
+                    self.bump(); // consume 'else'
+                    self.parse_stmt();
+                }
             }
             Some(SyntaxKind::While) => {
-                // TODO: while statement
                 self.bump();
-                self.errors
-                    .push("While statements not yet implemented".to_string());
+                self.expect_token(SyntaxKind::LParen);
+                self.parse_cond();
+                self.expect_token(SyntaxKind::RParen);
+                self.parse_stmt();
             }
             Some(SyntaxKind::Return) => {
                 // return [Exp] ';'
@@ -801,37 +965,95 @@ impl<'a> Parser<'a> {
                 if self.peek() != Some(SyntaxKind::Semicolon) {
                     self.parse_exp();
                 }
-                if self.peek() == Some(SyntaxKind::Semicolon) {
-                    self.bump();
-                } else {
-                    self.errors
-                        .push("Expected ';' after return statement".to_string());
-                }
+                self.expect_token(SyntaxKind::Semicolon);
             }
             Some(SyntaxKind::Break) | Some(SyntaxKind::Continue) => {
                 // 'break' ';' | 'continue' ';'
                 self.bump();
-                if self.peek() == Some(SyntaxKind::Semicolon) {
-                    self.bump();
-                } else {
-                    self.errors
-                        .push("Expected ';' after break/continue".to_string());
-                }
+                self.expect_token(SyntaxKind::Semicolon);
             }
             _ => {
-                // [Exp] ';' or LVal '=' Exp ';'
+                // 表达式语句或赋值语句: [Exp] ';' 或 LVal '=' Exp ';'
+                // 先解析表达式，然后检查是否有赋值运算符
                 if self.peek() != Some(SyntaxKind::Semicolon) {
+                    // 先解析左边的表达式（可能是 LVal）
                     self.parse_exp();
+
+                    // 检查是否是赋值语句
+                    if self.peek() == Some(SyntaxKind::Assign) {
+                        // 这是赋值语句: LVal '=' Exp ';'
+                        self.bump(); // consume '='
+                        self.parse_exp(); // 解析右边的表达式
+                    }
+                    // 如果没有 '='，那就是普通的表达式语句
                 }
-                if self.peek() == Some(SyntaxKind::Semicolon) {
-                    self.bump();
-                } else {
-                    self.errors.push("Expected ';' after statement".to_string());
-                }
+
+                self.expect_token(SyntaxKind::Semicolon);
             }
         }
 
         self.builder.finish_node();
+    }
+
+    /// Number → IntConst
+    /// 解析数字字面量，目前只支持整数，将来可以扩展支持浮点数
+    fn parse_number(&mut self) {
+        self.builder.start_node(SyntaxKind::Number.into());
+
+        // 使用 expect_token 来简化代码
+        self.expect_token(SyntaxKind::IntConst);
+        // 将来可以在这里添加浮点数支持
+        // if !self.expect_token(SyntaxKind::IntConst) {
+        //     self.expect_token(SyntaxKind::FloatConst);
+        // }
+
+        self.builder.finish_node();
+    }
+
+    /// 期望并消耗指定的 token，如果不匹配则报错
+    ///
+    /// # 参数
+    /// - `expected`: 期望的 token 类型
+    /// - `error_msg`: 如果不匹配时的错误消息
+    ///
+    /// # 返回值
+    /// - `true`: 成功消耗了期望的 token
+    /// - `false`: 没有找到期望的 token，已添加错误信息
+    fn expect(&mut self, expected: SyntaxKind, error_msg: &str) -> bool {
+        if self.peek() == Some(expected) {
+            self.bump();
+            true
+        } else {
+            self.errors.push(error_msg.to_string());
+            false
+        }
+    }
+
+    /// 期望并消耗指定的 token，使用默认错误消息
+    fn expect_token(&mut self, expected: SyntaxKind) -> bool {
+        let error_msg = match expected {
+            SyntaxKind::LBrace => "Expected '{'",
+            SyntaxKind::RBrace => "Expected '}'",
+            SyntaxKind::LParen => "Expected '('",
+            SyntaxKind::RParen => "Expected ')'",
+            SyntaxKind::LBracket => "Expected '['",
+            SyntaxKind::RBracket => "Expected ']'",
+            SyntaxKind::Semicolon => "Expected ';'",
+            SyntaxKind::Comma => "Expected ','",
+            SyntaxKind::Assign => "Expected '='",
+            SyntaxKind::Ident => "Expected identifier",
+            SyntaxKind::IntConst => "Expected number literal",
+            SyntaxKind::Const => "Expected 'const'",
+            SyntaxKind::Int => "Expected 'int'",
+            SyntaxKind::Void => "Expected 'void'",
+            SyntaxKind::Return => "Expected 'return'",
+            SyntaxKind::If => "Expected 'if'",
+            SyntaxKind::While => "Expected 'while'",
+            SyntaxKind::Break => "Expected 'break'",
+            SyntaxKind::Continue => "Expected 'continue'",
+            _ => "Expected token",
+        };
+        self.expect(expected, error_msg)
     }
 }
 
@@ -1076,6 +1298,598 @@ mod tests {
             int var2 = 5;
             
             void func2() {}
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_expect_token_functionality() {
+        // 测试 expect_token 函数的功能
+
+        // 测试成功的情况
+        let code = "const int x = 42;";
+        assert!(parse_success(code));
+
+        // 测试语法错误的情况 - 缺少分号
+        let errors = parse_and_get_errors("const int x = 42");
+        assert!(!errors.is_empty());
+        assert!(errors.iter().any(|e| e.contains("Expected ';'")));
+
+        // 测试语法错误的情况 - 缺少标识符
+        let errors = parse_and_get_errors("const int = 42;");
+        assert!(!errors.is_empty());
+        assert!(errors.iter().any(|e| e.contains("Expected identifier")));
+
+        // 测试语法错误的情况 - 缺少赋值符号
+        let errors = parse_and_get_errors("const int x 42;");
+        assert!(!errors.is_empty());
+        assert!(errors.iter().any(|e| e.contains("Expected '='")));
+    }
+
+    #[test]
+    fn test_if_statements() {
+        // 简单 if 语句
+        let code = r#"
+            void test() {
+                if (x > 0) {
+                    return 1;
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // if-else 语句
+        let code = r#"
+            void test() {
+                if (x > 0) 
+                    return 1;
+                else
+                    return 0;
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 嵌套 if 语句
+        let code = r#"
+            void test() {
+                if (x > 0) {
+                    if (y > 0) {
+                        return 1;
+                    } else {
+                        return 2;
+                    }
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // if 语句中的复杂条件
+        let code = r#"
+            void test() {
+                if (x > 0 && y < 10 || z == 5) {
+                    x = y;
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_while_statements() {
+        // 简单 while 语句
+        let code = r#"
+            void test() {
+                while (x > 0) {
+                    x = x - 1;
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // while 语句中的单个语句
+        let code = r#"
+            void test() {
+                while (x > 0)
+                    x = x - 1;
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 嵌套 while 语句
+        let code = r#"
+            void test() {
+                while (x > 0) {
+                    while (y > 0) {
+                        y = y - 1;
+                    }
+                    x = x - 1;
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // while 语句中的复杂条件
+        let code = r#"
+            void test() {
+                while (arr[i] != 0 && i < 10) {
+                    i = i + 1;
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_return_statements() {
+        // return 语句不带表达式
+        let code = r#"
+            void test() {
+                return;
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // return 语句带简单表达式
+        let code = r#"
+            int test() {
+                return 42;
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // return 语句带复杂表达式
+        let code = r#"
+            int test() {
+                return x + y * z - func(a, b);
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // return 语句带数组访问
+        let code = r#"
+            int test() {
+                return arr[i][j];
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_break_continue_statements() {
+        // break 语句
+        let code = r#"
+            void test() {
+                while (1) {
+                    if (x > 10) {
+                        break;
+                    }
+                    x = x + 1;
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // continue 语句
+        let code = r#"
+            void test() {
+                while (x < 100) {
+                    x = x + 1;
+                    if (x % 2 == 0) {
+                        continue;
+                    }
+                    print(x);
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 嵌套循环中的 break 和 continue
+        let code = r#"
+            void test() {
+                while (i < 10) {
+                    while (j < 10) {
+                        if (arr[i][j] == 0) {
+                            break;
+                        }
+                        if (arr[i][j] < 0) {
+                            continue;
+                        }
+                        j = j + 1;
+                    }
+                    i = i + 1;
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_assignment_statements() {
+        // 简单赋值
+        let code = r#"
+            void test() {
+                x = 5;
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 复杂表达式赋值
+        let code = r#"
+            void test() {
+                x = y + z * w - func(a, b);
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 数组元素赋值
+        let code = r#"
+            void test() {
+                arr[i] = 10;
+                matrix[i][j] = x + y;
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 多维数组赋值
+        let code = r#"
+            void test() {
+                tensor[i][j][k] = arr[x] + matrix[y][z];
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_expression_statements() {
+        // 函数调用语句
+        let code = r#"
+            void test() {
+                func(x, y, z);
+                print(42);
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 复杂表达式语句（虽然没有实际意义，但语法上合法）
+        let code = r#"
+            void test() {
+                x + y;
+                arr[i] * 2;
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 自增自减表达式（目前不支持，但测试解析不崩溃）
+        let code = r#"
+            void test() {
+                x;
+                func();
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_empty_statements() {
+        // 空语句
+        let code = r#"
+            void test() {
+                ;
+                ;;;
+                if (x > 0)
+                    ;
+                while (x > 0)
+                    ;
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_block_statements() {
+        // 简单块语句
+        let code = r#"
+            void test() {
+                {
+                    int x = 5;
+                    x = x + 1;
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 嵌套块语句
+        let code = r#"
+            void test() {
+                {
+                    int x = 1;
+                    {
+                        int y = 2;
+                        {
+                            int z = x + y;
+                        }
+                    }
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 空块语句
+        let code = r#"
+            void test() {
+                {}
+                { }
+                {
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_mixed_statements() {
+        // 混合各种语句类型
+        let code = r#"
+            void test() {
+                int i = 0;
+                int sum = 0;
+                
+                while (i < 10) {
+                    if (i % 2 == 0) {
+                        sum = sum + i;
+                    } else {
+                        continue;
+                    }
+                    
+                    if (sum > 100) {
+                        break;
+                    }
+                    
+                    {
+                        int temp = i * 2;
+                        arr[i] = temp;
+                    }
+                    
+                    i = i + 1;
+                }
+                
+                if (sum > 50) {
+                    return;
+                } else {
+                    print(sum);
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_statement_error_cases() {
+        // if 语句缺少条件
+        let errors = parse_and_get_errors(
+            r#"
+            void test() {
+                if {
+                    return;
+                }
+            }
+        "#,
+        );
+        assert!(!errors.is_empty());
+
+        // while 语句缺少条件
+        let errors = parse_and_get_errors(
+            r#"
+            void test() {
+                while {
+                    break;
+                }
+            }
+        "#,
+        );
+        assert!(!errors.is_empty());
+
+        // return 语句缺少分号
+        let errors = parse_and_get_errors(
+            r#"
+            void test() {
+                return 42
+            }
+        "#,
+        );
+        assert!(!errors.is_empty());
+
+        // break 语句缺少分号
+        let errors = parse_and_get_errors(
+            r#"
+            void test() {
+                while (1) {
+                    break
+                }
+            }
+        "#,
+        );
+        assert!(!errors.is_empty());
+
+        // 赋值语句缺少分号
+        let errors = parse_and_get_errors(
+            r#"
+            void test() {
+                x = 5
+            }
+        "#,
+        );
+        assert!(!errors.is_empty());
+
+        // if 语句缺少括号
+        let errors = parse_and_get_errors(
+            r#"
+            void test() {
+                if x > 0 {
+                    return;
+                }
+            }
+        "#,
+        );
+        assert!(!errors.is_empty());
+    }
+
+    #[test]
+    fn test_complex_nested_statements() {
+        // 复杂的嵌套语句结构
+        let code = r#"
+            void bubble_sort(int arr[], int n) {
+                int i = 0;
+                int j;
+                
+                while (i < n - 1) {
+                    j = 0;
+                    while (j < n - i - 1) {
+                        if (arr[j] > arr[j + 1]) {
+                            // 交换元素
+                            int temp = arr[j];
+                            arr[j] = arr[j + 1];
+                            arr[j + 1] = temp;
+                        }
+                        j = j + 1;
+                    }
+                    i = i + 1;
+                }
+            }
+        "#;
+        assert!(parse_success(code));
+
+        // 带有早期返回的复杂函数
+        let code = r#"
+            int find_max(int arr[], int size) {
+                if (size <= 0) {
+                    return -1;
+                }
+                
+                int max = arr[0];
+                int i = 1;
+                
+                while (i < size) {
+                    if (arr[i] > max) {
+                        max = arr[i];
+                    }
+                    i = i + 1;
+                }
+                
+                return max;
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_conditions_in_statements() {
+        // 测试条件表达式中的各种运算符
+        let code = r#"
+            void test() {
+                // if (x == y) return;
+                // if (x != y) return;
+                // if (x < y) return;
+                // if (x > y) return;
+                // if (x <= y) return;
+                // if (x >= y) return;
+                // if (x && y) return;
+                // if (x || y) return;
+                // if (!x) return;
+                // if (x && (y || z)) return;
+                if ((x > 0) && (y < 10)) return;
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_simple_function_call() {
+        // 测试简单的函数调用，不应该卡死
+        let code = r#"
+            void test() {
+                func();
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_minimal_function_call() {
+        // 最简单的函数调用
+        assert!(parse_success("void test() { func(); }"));
+    }
+
+    #[test]
+    fn test_function_call_with_one_param() {
+        // 一个参数的函数调用
+        assert!(parse_success("void test() { func(x); }"));
+    }
+
+    #[test]
+    fn test_function_call_with_simple_params() {
+        // 测试带简单参数的函数调用
+        let code = r#"
+            void test() {
+                func(x);
+                func(x, y);
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_function_call_with_number_params() {
+        // 测试带数字参数的函数调用
+        let code = r#"
+            void test() {
+                func(42);
+                func(1, 2);
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_complex_function_call_expression() {
+        // 测试复杂的函数调用表达式
+        let code = r#"
+            int test() {
+                return func(a, b);
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_complex_return_expression() {
+        // 测试原来有问题的复杂表达式
+        let code = r#"
+            int test() {
+                return x + y * z - func(a, b);
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_parenthesized_condition() {
+        // 测试括号表达式是否能正确解析条件
+        let code = r#"
+            void test() {
+                if ((x > 0)) return;
+            }
+        "#;
+        assert!(parse_success(code));
+    }
+
+    #[test]
+    fn test_simple_condition_without_parens() {
+        // 测试不带括号的简单条件
+        let code = r#"
+            void test() {
+                if (x > 0) return;
+            }
         "#;
         assert!(parse_success(code));
     }
